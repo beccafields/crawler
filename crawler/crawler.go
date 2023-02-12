@@ -2,7 +2,6 @@ package crawler
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -11,24 +10,23 @@ import (
 	"golang.org/x/net/html"
 )
 
+type HTTPClient interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
 var (
-	ErrNoURL       = errors.New("no URL given to crawl through - please provide a URL")
-	ErrNoBodyFound = errors.New("no body returned from page GET request")
+	Client HTTPClient
 )
 
-/*CrawlURL takes a string URL, fetches the data from it and extracts all the valid URLs within that data.
+/*
+CrawlURL takes a string URL, fetches the data from it and extracts all the valid URLs within that data.
 
-Only URLs of the form "http://example" or "https://example" are accepted - "www.example" is not
+It requires a http client to be supplied, in order to make a GET request.
 
-It returns a map where the keys are the URLs found and the values are always true bools, and an error.*/
-func CrawlURL(argURL string) (map[string]bool, error) {
-
-	_, err := url.ParseRequestURI(argURL)
-	if err != nil {
-		return nil, err
-	}
-
-	pageData, err := getPageData(argURL)
+It returns a map where the keys are the URLs found and the values are always true bools, and an error.
+*/
+func CrawlURL(url string, client HTTPClient) (map[string]bool, error) {
+	pageData, err := getPageData(url, client)
 	if err != nil {
 		return nil, err
 	}
@@ -39,49 +37,62 @@ func CrawlURL(argURL string) (map[string]bool, error) {
 	}
 
 	links := make(map[string]bool)
-	extractLinks(doc, &links)
+	extractLinks(doc, url, &links)
 
 	return links, nil
 }
 
-// PrettyPrint is a helper func to print out all keys of a given map on new lines
-func PrettyPrint[M ~map[K]V, K comparable, V any](m M) {
-	for k := range m {
-		fmt.Println(k)
-	}
-}
-
 // getPageData fetches the body data of the given URL and returns it as a string.
-// If no data is found, ErrNoBodyFound is returned. 
-func getPageData(url string) (string, error) {
-	resp, err := http.Get(url)
+func getPageData(url string, client HTTPClient) (string, error) {
+
+	// GET requests don't work for www.example.com URLs
+	if !strings.Contains(url, "https") {
+		url = "https://" + url
+	}
+
+	request, _ := http.NewRequest(http.MethodGet, url, nil)
+	resp, err := (client).Do(request)
 	if err != nil {
 		return "", err
 	}
+	if resp.StatusCode != http.StatusOK {
+		return "", errors.New("get request didn't return a 200 status - " + resp.Status)
+	}
 	defer resp.Body.Close()
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
 	if len(body) == 0 {
-		return "", ErrNoBodyFound
+		return "", errors.New("no body returned from page GET request")
 	}
 	return string(body), nil
 }
 
 // extractLinks takes a *html.Node and traverses it's children, checking for href tags and saving
 // any URLs found to the given map.
-func extractLinks(node *html.Node, links *map[string]bool) {
+func extractLinks(node *html.Node, argURL string, links *map[string]bool) {
 	if node.Type == html.ElementNode && node.Data == "a" {
 		for _, a := range node.Attr {
-			_, err := url.ParseRequestURI(a.Val)
+			parsedURL, err := url.ParseRequestURI(a.Val)
 			if a.Key == "href" && err == nil {
-				(*links)[a.Val] = true
+				// handle any relative links found
+				if parsedURL.Host == "" {
+					parsedURL.Host = argURL
+				}
+				if !strings.Contains(parsedURL.Host, "http") {
+					parsedURL.Host = "https://" + parsedURL.Host
+				}
+				if parsedURL.RawQuery != "" {
+					parsedURL.RawQuery = "?" + parsedURL.RawQuery
+				}
+				(*links)[parsedURL.Host+parsedURL.Path+parsedURL.RawQuery] = true
 				break
 			}
 		}
 	}
 	for c := node.FirstChild; c != nil; c = c.NextSibling {
-		extractLinks(c, links)
+		extractLinks(c, argURL, links)
 	}
 }
