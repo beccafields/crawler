@@ -5,18 +5,19 @@
 
 Build the project
 ```
-go build cmd/crawler/main.go
+$ go build cmd/crawlerapp/main.go
 ```
 
 Run the project
 ```
-./main https://google.com
+$ ./main https://google.com
 ```
 
 **Notes**: 
 - You must only supply one URL for the program to run
 - You can supply a URL in any of the following forms
     - `https://example.com`
+    - `http://example.com`
     - `www.example.com`
     - `example.com`
 
@@ -24,10 +25,10 @@ Run the project
 
 Run the tests
 ```
-go test ./... -v
+$ go test ./... -v
 ```
 
 Test coverage
 ```
-ok  	github.com/beccafields/crawler/crawler	0.003s	coverage: 89.5% of statements
+ok  	github.com/beccafields/crawler/crawler	0.003s	coverage: 91.9% of statements
 ```

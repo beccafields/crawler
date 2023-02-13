@@ -40,36 +40,65 @@ func (mockClient) Do(req *http.Request) (*http.Response, error) {
 		resp.StatusCode = http.StatusInternalServerError
 		resp.Status = "500 Error"
 		err = errors.New("could not make request")
+
+	case strings.Contains(req.URL.String(), "not200example"):
+		resp.Body = io.NopCloser(bytes.NewReader([]byte("")))
+		resp.StatusCode = http.StatusCreated
+		resp.Status = "201 Error"
+		err = nil
 	}
 
 	return resp, err
 }
 
-// Full successful test of the crawl package - more detailed cases handled under the tests for helper funcs
 func TestCrawlURL(t *testing.T) {
 	cases := []struct {
-		name          string
-		url           string
-		expectedLinks map[string]bool
-		expectedErr   bool
+		name            string
+		url             string
+		expectedLinks   []string
+		expectedErrText string
 	}{
 		{
-			"success full URL",
+			"success on full URL",
 			"https://successexample.com",
-			map[string]bool{
-				"https://example2.com": true,
-				"https://example3.com": true,
+			[]string{
+				"https://example2.com",
+				"https://example3.com",
 			},
-			false,
+			"",
 		},
 		{
-			"success partial URL",
+			"success on empty page",
+			"www.emptybody.com",
+			[]string{},
+			"",
+		},
+		{
+			"success on partial URL",
 			"successexample.com",
-			map[string]bool{
-				"https://example2.com": true,
-				"https://example3.com": true,
+			[]string{
+				"https://example2.com",
+				"https://example3.com",
 			},
-			false,
+			"",
+		},
+		{
+			"fail on empty URL",
+			"",
+			[]string(nil),
+			"get request didn't return a 200 status - got 0",
+		},
+		{
+			"fail on invalid URL",
+			"failexample.com.com",
+			[]string(nil),
+			"could not make request",
+		},
+		{
+			"fail on get request status",
+			"https://not200example.co.uk",
+			[]string(nil),
+			"get request didn't return a 200 status - got 201",
 		},
 	}
 
@@ -77,10 +106,11 @@ func TestCrawlURL(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			client := mockClient{}
 			links, err := CrawlURL(c.url, client)
-			if !c.expectedErr {
+			if c.expectedErrText == "" {
 				assert.NoError(t, err)
 			} else {
 				assert.Error(t, err)
+				assert.Contains(t, err.Error(), c.expectedErrText)
 			}
 			assert.Equal(t, c.expectedLinks, links)
 		})
@@ -89,28 +119,34 @@ func TestCrawlURL(t *testing.T) {
 
 func TestGetPageData(t *testing.T) {
 	cases := []struct {
-		name         string
-		url          string
-		expectedData string
-		expectedErr  bool
+		name            string
+		url             string
+		expectedData    string
+		expectedErrText string
 	}{
 		{
 			"success fetched data",
 			"https://successexample.com",
 			`<p>Links:</p><ul><li><a href="https://example2.com">Example 2</a><li><a href="https://example3.com">Example 3</a></ul>`,
-			false,
+			"",
 		},
 		{
-			"fail empty page data",
+			"success empty page data",
 			"https://emptybody.com",
 			"",
-			true,
+			"",
 		},
 		{
 			"fail invalid URL",
 			"failexample.com",
 			"",
-			true,
+			"could not make request",
+		},
+		{
+			"fail no error 201 status",
+			"https://not200example.com",
+			"",
+			"get request didn't return a 200 status - got 201",
 		},
 	}
 
@@ -118,10 +154,11 @@ func TestGetPageData(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			client := mockClient{}
 			pageData, err := getPageData(c.url, client)
-			if !c.expectedErr {
+			if c.expectedErrText == "" {
 				assert.NoError(t, err)
 			} else {
 				assert.Error(t, err)
+				assert.Contains(t, err.Error(), c.expectedErrText)
 			}
 			assert.Equal(t, c.expectedData, pageData)
 		})
@@ -133,40 +170,55 @@ func TestExtractLinks(t *testing.T) {
 		name          string
 		pageData      string
 		argURL        string
-		completeLinks map[string]bool
+		completeLinks []string
 	}{
 		{
 			"success with full links found",
 			`<p>Links:</p><ul><li><a href="https://example2.com">Example 2</a><li><a href="https://example3.com">Example 3</a></ul>`,
 			"https://example.com",
-			map[string]bool{
-				"https://example2.com": true,
-				"https://example3.com": true,
+			[]string{
+				"https://example2.com",
+				"https://example3.com",
 			},
 		},
 		{
 			"success with relative links found",
 			`<p>Links:</p><ul><li><a href="/relative1">Example 2</a><li><a href="/relative2">Example 3</a></ul>`,
 			"https://example.com",
-			map[string]bool{
-				"https://example.com/relative1": true,
-				"https://example.com/relative2": true,
+			[]string{
+				"https://example.com/relative1",
+				"https://example.com/relative2",
 			},
 		},
 		{
 			"success with invalid links ignored",
 			`<p>Links:</p><ul><li><a href="#main">Main</a><li><a href="https://example2.com">Example 2</a></ul>`,
 			"https://example.com",
-			map[string]bool{
-				"https://example2.com": true,
+			[]string{
+				"https://example2.com",
 			},
 		},
 		{
 			"success with query strings handled",
 			`<p>Links:</p><ul><li><a href="https://example2.com?this=added">Main</a><li></ul>`,
 			"https://example.com",
-			map[string]bool{
-				"https://example2.com?this=added": true,
+			[]string{
+				"https://example2.com?this=added",
+			},
+		},
+		{
+			"no URLs found",
+			`<p>Links:</p><ul><li><a>Main</a><li></ul>`,
+			"https://example.com",
+			[]string{},
+		},
+		{
+			"success same link found twice",
+			`<p>Links:</p><ul><li><a href="https://example2.com">Example 2</a><li><a href="https://example2.com">Example 2</a></ul>`,
+			"https://example.com",
+			[]string{
+				"https://example2.com",
+				"https://example2.com",
 			},
 		},
 	}
@@ -177,7 +229,7 @@ func TestExtractLinks(t *testing.T) {
 			node, err := html.Parse(strings.NewReader(c.pageData))
 			require.NoError(t, err)
 
-			links := make(map[string]bool)
+			links := []string{}
 			extractLinks(node, c.argURL, &links)
 
 			assert.Equal(t, c.completeLinks, links)
