@@ -21,6 +21,21 @@ $ ./main https://google.com
     - `www.example.com`
     - `example.com`
 
+## Using the crawler module
+
+You can use the crawler module in your own project by running
+```
+$ go get "github.com/beccafields/crawler"
+```
+adding the following as an import
+```
+"github.com/beccafields/crawler/crawler"
+```
+and using 
+```
+crawler.CrawlURL()
+```
+
 ## Tests
 
 Run the tests
