@@ -3,6 +3,7 @@ package crawler
 import (
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -42,6 +43,40 @@ func CrawlURL(url string, client HTTPClient) ([]string, error) {
 	extractLinks(doc, url, &links)
 
 	return links, nil
+}
+
+/*
+CrawlWeb visits the given URL, finds all links within it and then proceeds to visit them
+returning all links found within those
+
+# Once a URL has been visited it is sent down the supplied channel
+
+It will visit links until the number of visited links hits the given limit
+*/
+func CrawlWeb(url string, limit int, ch chan<- string) {
+
+	client := MakeDefaultClient()
+	visited := make(map[string]bool)
+	toVisit := []string{url}
+
+	for len(visited) < limit && len(toVisit) > 0 {
+		currentLink := toVisit[0]
+		toVisit = toVisit[1:]
+
+		newLinks, err := CrawlURL(currentLink, client)
+		if err != nil {
+			log.Println("Could not crawl " + url + " - error: " + err.Error())
+		}
+
+		for _, n := range newLinks {
+			if _, ok := visited[n]; !ok {
+				toVisit = append(toVisit, n)
+			}
+		}
+
+		visited[currentLink] = true
+		ch <- currentLink
+	}
 }
 
 // getPageData fetches the body data of the given URL and returns it as a string.
